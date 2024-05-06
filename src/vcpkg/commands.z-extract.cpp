@@ -1,10 +1,10 @@
 #include <vcpkg/base/fwd/message_sinks.h>
 
+#include <vcpkg/base/contractual-constants.h>
 #include <vcpkg/base/files.h>
 #include <vcpkg/base/strings.h>
 
 #include <vcpkg/archives.h>
-#include <vcpkg/commands.h>
 #include <vcpkg/commands.z-extract.h>
 #include <vcpkg/vcpkgcmdarguments.h>
 #include <vcpkg/vcpkgpaths.h>
@@ -13,10 +13,8 @@ using namespace vcpkg;
 
 namespace
 {
-    constexpr StringLiteral OPTION_STRIP = "strip";
-
     constexpr CommandSetting EXTRACT_SETTINGS[] = {
-        {OPTION_STRIP, msgCmdZExtractOptStrip},
+        {SwitchStrip, msgCmdZExtractOptStrip},
     };
 } // unnamed namespace
 
@@ -34,9 +32,9 @@ namespace vcpkg
         nullptr,
     };
 
-    ExpectedL<StripSetting> get_strip_setting(std::map<std::string, std::string, std::less<>> settings)
+    ExpectedL<StripSetting> get_strip_setting(const std::map<StringLiteral, std::string, std::less<>>& settings)
     {
-        auto iter = settings.find(OPTION_STRIP);
+        auto iter = settings.find(SwitchStrip);
         if (iter == settings.end())
         {
             // no strip option specified - default to manual strip 0
@@ -57,7 +55,7 @@ namespace vcpkg
         }
 
         // If the value is not an integer or is less than 0
-        return msg::format_error(msgErrorInvalidExtractOption, msg::option = OPTION_STRIP, msg::value = maybe_value);
+        return msg::format_error(msgErrorInvalidExtractOption, msg::option = SwitchStrip, msg::value = maybe_value);
     }
 
     constexpr IsSlash is_slash;

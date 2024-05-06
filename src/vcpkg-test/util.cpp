@@ -1,4 +1,4 @@
-#include <catch2/catch.hpp>
+#include <vcpkg-test/util.h>
 
 #include <vcpkg/base/checks.h>
 #include <vcpkg/base/system.h>
@@ -14,8 +14,6 @@
 #include <numeric>
 #include <set>
 #include <vector>
-
-#include <vcpkg-test/util.h>
 
 namespace vcpkg::Test
 {
@@ -56,7 +54,7 @@ namespace vcpkg::Test
         return std::move(*m_pgh.get());
     }
 
-    ParseExpected<SourceControlFile> test_parse_control_file(
+    ExpectedL<std::unique_ptr<SourceControlFile>> test_parse_control_file(
         const std::vector<std::unordered_map<std::string, std::string>>& v)
     {
         std::vector<vcpkg::Paragraph> pghs;
@@ -68,7 +66,7 @@ namespace vcpkg::Test
                 pghs.back().emplace(kv.first, std::make_pair(kv.second, vcpkg::TextRowCol{}));
             }
         }
-        return vcpkg::SourceControlFile::parse_control_file("", std::move(pghs));
+        return vcpkg::SourceControlFile::parse_control_file("test-origin", std::move(pghs));
     }
 
     std::unique_ptr<vcpkg::StatusParagraph> make_status_pgh(const char* name,
@@ -76,7 +74,8 @@ namespace vcpkg::Test
                                                             const char* default_features,
                                                             const char* triplet)
     {
-        return std::make_unique<StatusParagraph>(Paragraph{{"Package", {name, {}}},
+        return std::make_unique<StatusParagraph>(StringLiteral{"test"},
+                                                 Paragraph{{"Package", {name, {}}},
                                                            {"Version", {"1", {}}},
                                                            {"Architecture", {triplet, {}}},
                                                            {"Multi-Arch", {"same", {}}},
@@ -90,7 +89,8 @@ namespace vcpkg::Test
                                                              const char* depends,
                                                              const char* triplet)
     {
-        return std::make_unique<StatusParagraph>(Paragraph{{"Package", {name, {}}},
+        return std::make_unique<StatusParagraph>(StringLiteral{"test"},
+                                                 Paragraph{{"Package", {name, {}}},
                                                            {"Feature", {feature, {}}},
                                                            {"Architecture", {triplet, {}}},
                                                            {"Multi-Arch", {"same", {}}},
@@ -109,7 +109,8 @@ namespace vcpkg::Test
 
     PackageSpec PackageSpecMap::emplace(vcpkg::SourceControlFileAndLocation&& scfl)
     {
-        const auto& name = scfl.source_control_file->core_paragraph->name;
+        // copy name before moving scfl
+        auto name = scfl.to_name();
         REQUIRE(!Util::Maps::contains(map, name));
         map.emplace(name, std::move(scfl));
         return {name, triplet};
@@ -130,11 +131,16 @@ namespace vcpkg::Test
         ParserBase parser(sv, "test");
         while (!parser.at_eof())
         {
-            auto opt = parse_qualified_specifier(parser);
-            REQUIRE(opt.has_value());
-            bool unused = false;
-            ret.push_back(
-                opt.get()->to_full_spec(X86_WINDOWS, unused, ImplicitDefault::YES).value_or_exit(VCPKG_LINE_INFO));
+            auto maybe_opt = parse_qualified_specifier(
+                parser, AllowFeatures::Yes, ParseExplicitTriplet::Allow, AllowPlatformSpec::No);
+            if (auto opt = maybe_opt.get())
+            {
+                ret.push_back(opt->to_full_spec(X86_WINDOWS, ImplicitDefault::Yes));
+            }
+            else
+            {
+                FAIL();
+            }
         }
 
         return ret;

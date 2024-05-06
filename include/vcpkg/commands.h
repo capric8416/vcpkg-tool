@@ -1,13 +1,12 @@
 #pragma once
 
 #include <vcpkg/base/fwd/files.h>
+#include <vcpkg/base/fwd/span.h>
+#include <vcpkg/base/fwd/stringview.h>
 
 #include <vcpkg/fwd/triplet.h>
 #include <vcpkg/fwd/vcpkgcmdarguments.h>
 #include <vcpkg/fwd/vcpkgpaths.h>
-
-#include <vcpkg/base/span.h>
-#include <vcpkg/base/stringview.h>
 
 #include <string>
 
@@ -33,6 +32,6 @@ namespace vcpkg
 
     std::vector<const CommandMetadata*> get_all_commands_metadata();
 
-    void print_zero_args_usage();
+    std::string get_zero_args_usage();
     void print_full_command_list();
 }

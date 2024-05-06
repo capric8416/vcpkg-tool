@@ -1,4 +1,5 @@
 #include <vcpkg/base/checks.h>
+#include <vcpkg/base/contractual-constants.h>
 #include <vcpkg/base/strings.h>
 #include <vcpkg/base/util.h>
 
@@ -8,89 +9,73 @@
 
 namespace vcpkg
 {
-    namespace Fields
+    BinaryParagraph::BinaryParagraph(StringView origin, Paragraph&& fields)
     {
-        static constexpr StringLiteral PACKAGE = "Package";
-        static constexpr StringLiteral VERSION = "Version";
-        static constexpr StringLiteral PORT_VERSION = "Port-Version";
-        static constexpr StringLiteral ARCHITECTURE = "Architecture";
-        static constexpr StringLiteral MULTI_ARCH = "Multi-Arch";
-    }
-
-    namespace Fields
-    {
-        static constexpr StringLiteral ABI = "Abi";
-        static constexpr StringLiteral FEATURE = "Feature";
-        static constexpr StringLiteral DESCRIPTION = "Description";
-        static constexpr StringLiteral MAINTAINER = "Maintainer";
-        static constexpr StringLiteral DEPENDS = "Depends";
-        static constexpr StringLiteral DEFAULT_FEATURES = "Default-Features";
-    }
-
-    BinaryParagraph::BinaryParagraph() = default;
-
-    BinaryParagraph::BinaryParagraph(Paragraph&& fields)
-    {
-        ParagraphParser parser(std::move(fields));
-
-        {
-            std::string name;
-            parser.required_field(Fields::PACKAGE, name);
-            std::string architecture;
-            parser.required_field(Fields::ARCHITECTURE, architecture);
-            this->spec = PackageSpec(std::move(name), Triplet::from_canonical_name(std::move(architecture)));
-        }
+        ParagraphParser parser(origin, std::move(fields));
+        this->spec = PackageSpec(parser.required_field(ParagraphIdPackage),
+                                 Triplet::from_canonical_name(parser.required_field(ParagraphIdArchitecture)));
 
         // one or the other
-        this->version = parser.optional_field(Fields::VERSION);
-        this->feature = parser.optional_field(Fields::FEATURE);
-
-        auto pv_str = parser.optional_field(Fields::PORT_VERSION);
-        this->port_version = 0;
-        if (!pv_str.empty())
+        this->version.text = parser.optional_field_or_empty(ParagraphIdVersion);
+        auto maybe_port_version = parser.optional_field(ParagraphIdPortVersion);
+        auto port_version = maybe_port_version.get();
+        this->version.port_version = 0;
+        if (port_version)
         {
-            auto pv_opt = Strings::strto<int>(pv_str);
+            auto pv_opt = Strings::strto<int>(port_version->first);
             if (auto pv = pv_opt.get())
             {
-                this->port_version = *pv;
+                this->version.port_version = *pv;
             }
             else
             {
-                parser.add_type_error(Fields::PORT_VERSION, msg::format(msgANonNegativeInteger));
+                parser.add_error(port_version->second, msgPortVersionControlMustBeANonNegativeInteger);
             }
         }
 
-        this->description = Strings::split(parser.optional_field(Fields::DESCRIPTION), '\n');
-        this->maintainers = Strings::split(parser.optional_field(Fields::MAINTAINER), '\n');
+        this->feature = parser.optional_field_or_empty(ParagraphIdFeature);
+        this->description = Strings::split(parser.optional_field_or_empty(ParagraphIdDescription), '\n');
+        this->maintainers = Strings::split(parser.optional_field_or_empty(ParagraphIdMaintainer), '\n');
 
-        this->abi = parser.optional_field(Fields::ABI);
+        this->abi = parser.optional_field_or_empty(ParagraphIdAbi);
 
-        std::string multi_arch;
-        parser.required_field(Fields::MULTI_ARCH, multi_arch);
+        std::string multi_arch = parser.required_field(ParagraphIdMultiArch);
 
         Triplet my_triplet = this->spec.triplet();
-        this->dependencies = Util::fmap(
-            parse_qualified_specifier_list(parser.optional_field(Fields::DEPENDS)).value_or_exit(VCPKG_LINE_INFO),
-            [my_triplet](const ParsedQualifiedSpecifier& dep) {
-                // for compatibility with previous vcpkg versions, we discard all irrelevant information
-                return PackageSpec{
-                    dep.name,
-                    dep.triplet.map([](auto&& s) { return Triplet::from_canonical_name(std::string(s)); })
-                        .value_or(my_triplet),
-                };
-            });
+        auto maybe_depends_field = parser.optional_field(ParagraphIdDepends);
+        if (auto depends_field = maybe_depends_field.get())
+        {
+            this->dependencies = Util::fmap(
+                parse_qualified_specifier_list(std::move(depends_field->first), origin, depends_field->second)
+                    .value_or_exit(VCPKG_LINE_INFO),
+                [my_triplet](const ParsedQualifiedSpecifier& dep) {
+                    // for compatibility with previous vcpkg versions, we discard all irrelevant information
+                    return PackageSpec{
+                        dep.name,
+                        dep.triplet.map([](auto&& s) { return Triplet::from_canonical_name(std::string(s)); })
+                            .value_or(my_triplet),
+                    };
+                });
+        }
         if (!this->is_feature())
         {
-            this->default_features = parse_default_features_list(parser.optional_field(Fields::DEFAULT_FEATURES))
-                                         .value_or_exit(VCPKG_LINE_INFO);
+            auto maybe_default_features_field = parser.optional_field(ParagraphIdDefaultFeatures);
+            if (auto default_features_field = maybe_default_features_field.get())
+            {
+                this->default_features = parse_default_features_list(std::move(default_features_field->first),
+                                                                     origin,
+                                                                     default_features_field->second)
+                                             .value_or_exit(VCPKG_LINE_INFO);
+            }
         }
 
         // This is leftover from a previous attempt to add "alias ports", not currently used.
         (void)parser.optional_field("Type");
-        if (const auto err = parser.error_info(this->spec.to_string()))
+        const auto maybe_error = parser.error();
+        if (auto error = maybe_error.get())
         {
             msg::println_error(msgErrorParsingBinaryParagraph, msg::spec = this->spec);
-            print_error_message(err);
+            print_error_message(*error);
             Checks::exit_fail(VCPKG_LINE_INFO);
         }
 
@@ -106,8 +91,7 @@ namespace vcpkg
                                      const std::string& abi_tag,
                                      std::vector<PackageSpec> deps)
         : spec(spgh.name, triplet)
-        , version(spgh.raw_version)
-        , port_version(spgh.port_version)
+        , version(spgh.version)
         , description(spgh.description)
         , maintainers(spgh.maintainers)
         , feature()
@@ -123,7 +107,6 @@ namespace vcpkg
                                      std::vector<PackageSpec> deps)
         : spec(spec)
         , version()
-        , port_version()
         , description(fpgh.description)
         , maintainers()
         , feature(fpgh.name)
@@ -161,9 +144,9 @@ namespace vcpkg
         }
     }
 
-    std::string BinaryParagraph::displayname() const
+    std::string BinaryParagraph::display_name() const
     {
-        if (!this->is_feature() || this->feature == "core")
+        if (!this->is_feature() || this->feature == FeatureNameCore)
         {
             return fmt::format("{}:{}", this->spec.name(), this->spec.triplet());
         }
@@ -175,14 +158,13 @@ namespace vcpkg
 
     std::string BinaryParagraph::fullstem() const
     {
-        return fmt::format("{}_{}_{}", this->spec.name(), this->version, this->spec.triplet());
+        return fmt::format("{}_{}_{}", this->spec.name(), this->version.text, this->spec.triplet());
     }
 
     bool operator==(const BinaryParagraph& lhs, const BinaryParagraph& rhs)
     {
         if (lhs.spec != rhs.spec) return false;
         if (lhs.version != rhs.version) return false;
-        if (lhs.port_version != rhs.port_version) return false;
         if (lhs.description != rhs.description) return false;
         if (lhs.maintainers != rhs.maintainers) return false;
         if (lhs.feature != rhs.feature) return false;
@@ -202,7 +184,7 @@ namespace vcpkg
             return;
         }
 
-        out_str.append(name.begin(), name.end()).append(": ").append(field).push_back('\n');
+        out_str.append(name.data(), name.size()).append(": ").append(field).push_back('\n');
     }
     static void serialize_array(StringView name,
                                 const std::vector<std::string>& array,
@@ -214,7 +196,7 @@ namespace vcpkg
             return;
         }
 
-        out_str.append(name.begin(), name.end()).append(": ");
+        out_str.append(name.data(), name.size()).append(": ");
         out_str.append(Strings::join(joiner, array));
         out_str.push_back('\n');
     }
@@ -241,42 +223,40 @@ namespace vcpkg
     {
         const size_t initial_end = out_str.size();
 
-        serialize_string(Fields::PACKAGE, pgh.spec.name(), out_str);
+        serialize_string(ParagraphIdPackage, pgh.spec.name(), out_str);
 
-        serialize_string(Fields::VERSION, pgh.version, out_str);
-        if (pgh.port_version != 0)
+        serialize_string(ParagraphIdVersion, pgh.version.text, out_str);
+        if (pgh.version.port_version != 0)
         {
-            out_str.append(Fields::PORT_VERSION.data(), Fields::PORT_VERSION.size())
-                .append(": ")
-                .append(std::to_string(pgh.port_version))
-                .push_back('\n');
+            fmt::format_to(std::back_inserter(out_str), "{}: {}\n", ParagraphIdPortVersion, pgh.version.port_version);
         }
 
         if (pgh.is_feature())
         {
-            serialize_string(Fields::FEATURE, pgh.feature, out_str);
+            serialize_string(ParagraphIdFeature, pgh.feature, out_str);
         }
 
         if (!pgh.dependencies.empty())
         {
-            serialize_string(Fields::DEPENDS, serialize_deps_list(pgh.dependencies, pgh.spec.triplet()), out_str);
+            serialize_string(ParagraphIdDepends, serialize_deps_list(pgh.dependencies, pgh.spec.triplet()), out_str);
         }
 
-        serialize_string(Fields::ARCHITECTURE, pgh.spec.triplet().to_string(), out_str);
-        serialize_string(Fields::MULTI_ARCH, "same", out_str);
+        serialize_string(ParagraphIdArchitecture, pgh.spec.triplet().to_string(), out_str);
+        serialize_string(ParagraphIdMultiArch, "same", out_str);
 
-        serialize_paragraph(Fields::MAINTAINER, pgh.maintainers, out_str);
+        serialize_paragraph(ParagraphIdMaintainer, pgh.maintainers, out_str);
 
-        serialize_string(Fields::ABI, pgh.abi, out_str);
+        serialize_string(ParagraphIdAbi, pgh.abi, out_str);
 
-        serialize_paragraph(Fields::DESCRIPTION, pgh.description, out_str);
+        serialize_paragraph(ParagraphIdDescription, pgh.description, out_str);
 
-        serialize_array(Fields::DEFAULT_FEATURES, pgh.default_features, out_str);
+        serialize_array(ParagraphIdDefaultFeatures, pgh.default_features, out_str);
 
         // sanity check the serialized data
         auto my_paragraph = StringView{out_str}.substr(initial_end);
-        auto parsed_paragraph = Paragraphs::parse_single_paragraph(
-            StringView{out_str}.substr(initial_end), "vcpkg::serialize(const BinaryParagraph&, std::string&)");
+        static constexpr StringLiteral sanity_parse_origin = "vcpkg::serialize(const BinaryParagraph&, std::string&)";
+        auto parsed_paragraph =
+            Paragraphs::parse_single_paragraph(StringView{out_str}.substr(initial_end), sanity_parse_origin);
         if (!parsed_paragraph)
         {
             Checks::msg_exit_maybe_upgrade(
@@ -286,7 +266,7 @@ namespace vcpkg
                     .append_raw(my_paragraph));
         }
 
-        auto binary_paragraph = BinaryParagraph(std::move(*parsed_paragraph.get()));
+        auto binary_paragraph = BinaryParagraph(sanity_parse_origin, std::move(*parsed_paragraph.get()));
         if (binary_paragraph != pgh)
         {
             Checks::msg_exit_maybe_upgrade(VCPKG_LINE_INFO,
@@ -305,8 +285,8 @@ namespace vcpkg
             "\nspec: \"{}\"\nversion: \"{}\"\nport_version: {}\ndescription: [\"{}\"]\nmaintainers: [\"{}\"]\nfeature: "
             "\"{}\"\ndefault_features: [\"{}\"]\ndependencies: [\"{}\"]\nabi: \"{}\"",
             paragraph.spec.to_string(),
-            paragraph.version,
-            paragraph.port_version,
+            paragraph.version.text,
+            paragraph.version.port_version,
             Strings::join(join_str, paragraph.description),
             Strings::join(join_str, paragraph.maintainers),
             paragraph.feature,

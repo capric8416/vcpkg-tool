@@ -1,13 +1,10 @@
-#include <catch2/catch.hpp>
+#include <vcpkg-test/util.h>
 
 #include <vcpkg/base/strings.h>
 
 #include <vcpkg/paragraphs.h>
 
-#include <vcpkg-test/util.h>
-
-namespace Strings = vcpkg::Strings;
-using vcpkg::Paragraph;
+using namespace vcpkg;
 
 namespace
 {
@@ -20,7 +17,7 @@ namespace
             for (auto&& kv : p)
                 pghs.back().emplace(kv.first, std::make_pair(kv.second, vcpkg::TextRowCol{}));
         }
-        return vcpkg::SourceControlFile::parse_control_file("", std::move(pghs));
+        return vcpkg::SourceControlFile::parse_control_file("test-origin", std::move(pghs));
     }
 
     auto test_make_binary_paragraph(const std::unordered_map<std::string, std::string>& v)
@@ -29,7 +26,7 @@ namespace
         for (auto&& kv : v)
             pgh.emplace(kv.first, std::make_pair(kv.second, vcpkg::TextRowCol{}));
 
-        return vcpkg::BinaryParagraph(std::move(pgh));
+        return vcpkg::BinaryParagraph("test", std::move(pgh));
     }
 
 }
@@ -44,8 +41,9 @@ TEST_CASE ("SourceParagraph construct minimum", "[paragraph]")
     REQUIRE(m_pgh.has_value());
     auto& pgh = **m_pgh.get();
 
-    REQUIRE(pgh.core_paragraph->name == "zlib");
-    REQUIRE(pgh.core_paragraph->raw_version == "1.2.8");
+    REQUIRE(pgh.to_name() == "zlib");
+    REQUIRE(pgh.to_version_scheme() == VersionScheme::String);
+    REQUIRE(pgh.to_version() == Version{"1.2.8", 0});
     REQUIRE(pgh.core_paragraph->maintainers.empty());
     REQUIRE(pgh.core_paragraph->description.empty());
     REQUIRE(pgh.core_paragraph->dependencies.size() == 0);
@@ -60,7 +58,7 @@ TEST_CASE ("SourceParagraph construct invalid", "[paragraph]")
     }});
 
     REQUIRE(!m_pgh.has_value());
-    REQUIRE(m_pgh.error()->has_error());
+    REQUIRE(m_pgh.error() != LocalizedString());
 
     m_pgh = test_parse_control_file({{
         {"Source", "zlib"},
@@ -69,7 +67,7 @@ TEST_CASE ("SourceParagraph construct invalid", "[paragraph]")
     }});
 
     REQUIRE(!m_pgh.has_value());
-    REQUIRE(m_pgh.error()->has_error());
+    REQUIRE(m_pgh.error() != LocalizedString());
 
     m_pgh = test_parse_control_file({
         {
@@ -83,7 +81,7 @@ TEST_CASE ("SourceParagraph construct invalid", "[paragraph]")
     });
 
     REQUIRE(!m_pgh.has_value());
-    REQUIRE(m_pgh.error()->has_error());
+    REQUIRE(m_pgh.error() != LocalizedString());
 
     // invalid field`s name
     m_pgh = test_parse_control_file({{
@@ -92,7 +90,7 @@ TEST_CASE ("SourceParagraph construct invalid", "[paragraph]")
     }});
 
     REQUIRE(!m_pgh.has_value());
-    REQUIRE(m_pgh.error()->has_error());
+    REQUIRE(m_pgh.error() != LocalizedString());
 }
 
 TEST_CASE ("SourceParagraph construct maximum", "[paragraph]")
@@ -108,8 +106,9 @@ TEST_CASE ("SourceParagraph construct maximum", "[paragraph]")
     REQUIRE(m_pgh.has_value());
     auto& pgh = **m_pgh.get();
 
-    REQUIRE(pgh.core_paragraph->name == "s");
-    REQUIRE(pgh.core_paragraph->raw_version == "v");
+    REQUIRE(pgh.to_name() == "s");
+    REQUIRE(pgh.to_version_scheme() == VersionScheme::String);
+    REQUIRE(pgh.to_version() == Version{"v", 0});
     REQUIRE(pgh.core_paragraph->maintainers.size() == 1);
     REQUIRE(pgh.core_paragraph->maintainers[0] == "m");
     REQUIRE(pgh.core_paragraph->description.size() == 1);
@@ -182,8 +181,9 @@ TEST_CASE ("SourceParagraph construct qualified dependencies", "[paragraph]")
     REQUIRE(m_pgh.has_value());
     auto& pgh = **m_pgh.get();
 
-    REQUIRE(pgh.core_paragraph->name == "zlib");
-    REQUIRE(pgh.core_paragraph->raw_version == "1.2.8");
+    REQUIRE(pgh.to_name() == "zlib");
+    REQUIRE(pgh.to_version_scheme() == VersionScheme::String);
+    REQUIRE(pgh.to_version() == Version{"1.2.8", 0});
     REQUIRE(pgh.core_paragraph->maintainers.empty());
     REQUIRE(pgh.core_paragraph->description.empty());
     REQUIRE(pgh.core_paragraph->dependencies.size() == 2);
@@ -218,7 +218,25 @@ TEST_CASE ("BinaryParagraph construct minimum", "[paragraph]")
     });
 
     REQUIRE(pgh.spec.name() == "zlib");
-    REQUIRE(pgh.version == "1.2.8");
+    REQUIRE(pgh.version == Version{"1.2.8", 0});
+    REQUIRE(pgh.maintainers.empty());
+    REQUIRE(pgh.description.empty());
+    REQUIRE(pgh.spec.triplet().canonical_name() == "x86-windows");
+    REQUIRE(pgh.dependencies.size() == 0);
+}
+
+TEST_CASE ("BinaryParagraph construct minimum with port-version", "[paragraph]")
+{
+    auto pgh = test_make_binary_paragraph({
+        {"Package", "zlib"},
+        {"Version", "1.2.8"},
+        {"Port-Version", "2"},
+        {"Architecture", "x86-windows"},
+        {"Multi-Arch", "same"},
+    });
+
+    REQUIRE(pgh.spec.name() == "zlib");
+    REQUIRE(pgh.version == Version{"1.2.8", 2});
     REQUIRE(pgh.maintainers.empty());
     REQUIRE(pgh.description.empty());
     REQUIRE(pgh.spec.triplet().canonical_name() == "x86-windows");
@@ -238,7 +256,7 @@ TEST_CASE ("BinaryParagraph construct maximum", "[paragraph]")
     });
 
     REQUIRE(pgh.spec.name() == "s");
-    REQUIRE(pgh.version == "v");
+    REQUIRE(pgh.version == Version{"v", 0});
     REQUIRE(pgh.maintainers.size() == 1);
     REQUIRE(pgh.maintainers[0] == "m");
     REQUIRE(pgh.description.size() == 1);
@@ -314,14 +332,14 @@ TEST_CASE ("BinaryParagraph default features", "[paragraph]")
 TEST_CASE ("parse paragraphs empty", "[paragraph]")
 {
     const char* str = "";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
     REQUIRE(pghs.empty());
 }
 
 TEST_CASE ("parse paragraphs one field", "[paragraph]")
 {
     const char* str = "f1: v1";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
     REQUIRE(pghs.size() == 1);
     REQUIRE(pghs[0].size() == 1);
     REQUIRE(pghs[0]["f1"].first == "v1");
@@ -331,7 +349,7 @@ TEST_CASE ("parse paragraphs one pgh", "[paragraph]")
 {
     const char* str = "f1: v1\n"
                       "f2: v2";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
     REQUIRE(pghs.size() == 1);
     REQUIRE(pghs[0].size() == 2);
     REQUIRE(pghs[0]["f1"].first == "v1");
@@ -345,7 +363,7 @@ TEST_CASE ("parse paragraphs two pgh", "[paragraph]")
                       "\n"
                       "f3: v3\n"
                       "f4: v4";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 2);
     REQUIRE(pghs[0].size() == 2);
@@ -363,7 +381,7 @@ TEST_CASE ("parse paragraphs field names", "[paragraph]")
                       "F:\n"
                       "0:\n"
                       "F-2:\n";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 1);
     REQUIRE(pghs[0].size() == 5);
@@ -377,7 +395,7 @@ TEST_CASE ("parse paragraphs multiple blank lines", "[paragraph]")
                       "\n"
                       "f3: v3\n"
                       "f4: v4";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 2);
 }
@@ -386,7 +404,7 @@ TEST_CASE ("parse paragraphs empty fields", "[paragraph]")
 {
     const char* str = "f1:\n"
                       "f2: ";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 1);
     REQUIRE(pghs[0].size() == 2);
@@ -402,7 +420,7 @@ TEST_CASE ("parse paragraphs multiline fields", "[paragraph]")
                       "f2:\r\n"
                       " f2\r\n"
                       " continue\r\n";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 1);
     REQUIRE(pghs[0]["f1"].first == "simple\n f1");
@@ -416,7 +434,7 @@ TEST_CASE ("parse paragraphs crlfs", "[paragraph]")
                       "\r\n"
                       "f3: v3\r\n"
                       "f4: v4";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 2);
     REQUIRE(pghs[0].size() == 2);
@@ -438,7 +456,7 @@ TEST_CASE ("parse paragraphs comment", "[paragraph]")
                       "f3: v3\r\n"
                       "#comment\r\n"
                       "f4: v4";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 2);
     REQUIRE(pghs[0].size() == 2);
@@ -453,7 +471,7 @@ TEST_CASE ("parse comment before single line feed", "[paragraph]")
 {
     const char* str = "f1: v1\r\n"
                       "#comment\n";
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(str, "test-origin").value_or_exit(VCPKG_LINE_INFO);
     REQUIRE(pghs[0].size() == 1);
     REQUIRE(pghs[0]["f1"].first == "v1");
 }
@@ -467,7 +485,7 @@ TEST_CASE ("BinaryParagraph serialize min", "[paragraph]")
         {"Multi-Arch", "same"},
     });
     std::string ss = Strings::serialize(pgh);
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 1);
     REQUIRE(pghs[0].size() == 4);
@@ -489,7 +507,7 @@ TEST_CASE ("BinaryParagraph serialize max", "[paragraph]")
         {"Multi-Arch", "same"},
     });
     std::string ss = Strings::serialize(pgh);
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 1);
     REQUIRE(pghs[0].size() == 7);
@@ -513,7 +531,7 @@ TEST_CASE ("BinaryParagraph serialize multiple deps", "[paragraph]")
             {"Depends", "a, b, c"},
         });
         std::string ss = Strings::serialize(pgh);
-        auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "").value_or_exit(VCPKG_LINE_INFO);
+        auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
         REQUIRE(pghs.size() == 1);
         REQUIRE(pghs[0]["Depends"].first == "a, b, c");
@@ -528,7 +546,7 @@ TEST_CASE ("BinaryParagraph serialize multiple deps", "[paragraph]")
             {"Depends", "a:x64-windows, b, c:arm-uwp"},
         });
         std::string ss = Strings::serialize(pgh);
-        auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "").value_or_exit(VCPKG_LINE_INFO);
+        auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
         REQUIRE(pghs.size() == 1);
         REQUIRE(pghs[0]["Depends"].first == "a:x64-windows, b, c:arm-uwp");
@@ -546,7 +564,7 @@ TEST_CASE ("BinaryParagraph serialize abi", "[paragraph]")
         {"Abi", "123abc"},
     });
     std::string ss = Strings::serialize(pgh);
-    auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "").value_or_exit(VCPKG_LINE_INFO);
+    auto pghs = vcpkg::Paragraphs::parse_paragraphs(ss, "test-origin").value_or_exit(VCPKG_LINE_INFO);
 
     REQUIRE(pghs.size() == 1);
     REQUIRE(pghs[0]["Abi"].first == "123abc");

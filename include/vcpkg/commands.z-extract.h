@@ -1,9 +1,10 @@
 #pragma once
 
+#include <vcpkg/base/fwd/expected.h>
+
 #include <vcpkg/fwd/vcpkgcmdarguments.h>
 #include <vcpkg/fwd/vcpkgpaths.h>
 
-#include <vcpkg/base/expected.h>
 #include <vcpkg/base/path.h>
 
 #include <stddef.h>
@@ -38,7 +39,7 @@ namespace vcpkg
         }
     };
 
-    ExpectedL<StripSetting> get_strip_setting(std::map<std::string, std::string, std::less<>> settings);
+    ExpectedL<StripSetting> get_strip_setting(const std::map<StringLiteral, std::string, std::less<>>& settings);
 
     struct ExtractedArchive
     {

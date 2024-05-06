@@ -3,17 +3,15 @@
 $env:X_VCPKG_REGISTRIES_CACHE = Join-Path $TestingRoot 'registries'
 New-Item -ItemType Directory -Force $env:X_VCPKG_REGISTRIES_CACHE | Out-Null
 
-$builtinRegistryArgs = $commonArgs + @("--x-builtin-registry-versions-dir=$PSScriptRoot/../e2e-ports/versions")
-
-Run-Vcpkg install @builtinRegistryArgs 'vcpkg-internal-e2e-test-port'
+Run-Vcpkg install @commonArgs 'vcpkg-internal-e2e-test-port'
 Throw-IfNotFailed
 
 # We should not look into the versions directory unless we have a baseline,
 # even if we pass the registries feature flag
-Run-Vcpkg install @builtinRegistryArgs --feature-flags=registries 'vcpkg-internal-e2e-test-port'
+Run-Vcpkg install @commonArgs --feature-flags=registries 'vcpkg-internal-e2e-test-port'
 Throw-IfNotFailed
 
-Run-Vcpkg install @builtinRegistryArgs --feature-flags=registries 'vcpkg-cmake'
+Run-Vcpkg install @commonArgs --feature-flags=registries 'vcpkg-cmake'
 Throw-IfFailed
 
 Write-Trace "Test git and filesystem registries"
@@ -33,9 +31,13 @@ Copy-Item -Recurse `
 New-Item `
     -Path "$filesystemRegistry/versions" `
     -ItemType Directory
-Copy-Item `
-    -LiteralPath "$PSScriptRoot/../e2e-ports/versions/baseline.json" `
-    -Destination "$filesystemRegistry/versions/baseline.json"
+Set-Content -Value @"
+{
+    "default": {
+        "vcpkg-internal-e2e-test-port": { "baseline": "1.0.0" }
+    }
+}
+"@ -LiteralPath "$filesystemRegistry/versions/baseline.json"
 New-Item `
     -Path "$filesystemRegistry/versions/v-" `
     -ItemType Directory
@@ -62,12 +64,6 @@ $gitRegistryUpstream = (Get-Item $gitRegistryUpstream).FullName
 Push-Location $gitRegistryUpstream
 try
 {
-    $gitConfigOptions = @(
-        '-c', 'user.name=Nobody',
-        '-c', 'user.email=nobody@example.com',
-        '-c', 'core.autocrlf=false'
-    )
-
     $gitMainBranch = 'main'
     $gitSecondaryBranch = 'secondary'
 
@@ -221,7 +217,7 @@ try
     New-Item -Path 'vcpkg-configuration.json' -ItemType File `
         -Value (ConvertTo-Json -Depth 5 -InputObject $vcpkgConfigurationJson)
 
-    Run-Vcpkg install @builtinRegistryArgs '--feature-flags=registries,manifests'
+    Run-Vcpkg install @commonArgs '--feature-flags=registries,manifests'
     Throw-IfFailed
 }
 finally
@@ -267,7 +263,7 @@ try
     New-Item -Path 'vcpkg-configuration.json' -ItemType File `
         -Value (ConvertTo-Json -Depth 5 -InputObject $vcpkgConfigurationJson)
 
-    Run-Vcpkg install @builtinRegistryArgs '--feature-flags=registries,manifests'
+    Run-Vcpkg install @commonArgs '--feature-flags=registries,manifests'
     Throw-IfFailed
 }
 finally
@@ -324,7 +320,7 @@ try
     New-Item -Path 'vcpkg-configuration.json' -ItemType File `
         -Value (ConvertTo-Json -Depth 5 -InputObject $vcpkgConfigurationJson)
 
-    Run-Vcpkg install @builtinRegistryArgs '--feature-flags=registries,manifests' --dry-run
+    Run-Vcpkg install @commonArgs '--feature-flags=registries,manifests' --dry-run
     Throw-IfFailed
     Require-FileExists $env:X_VCPKG_REGISTRIES_CACHE/git-trees/$vcpkgInternalE2eTestPortGitTree
     Require-FileExists $env:X_VCPKG_REGISTRIES_CACHE/git-trees/$vcpkgInternalE2eTestPort2GitTree
@@ -334,7 +330,7 @@ try
     # Dry run does not create a lockfile
     Require-FileNotExists $installRoot/vcpkg/vcpkg-lock.json
 
-    Run-Vcpkg install @builtinRegistryArgs '--feature-flags=registries,manifests'
+    Run-Vcpkg install @commonArgs '--feature-flags=registries,manifests'
     Throw-IfFailed
 
     $expectedVcpkgLockJson = "{$(ConvertTo-Json $gitRegistryUpstream):{
@@ -379,7 +375,7 @@ try
     }
    New-Item -Path $installRoot/vcpkg/vcpkg-lock.json -ItemType File `
         -Value (ConvertTo-Json -Depth 5 -InputObject $vcpkgLockJson)
-    Run-Vcpkg install @builtinRegistryArgs '--feature-flags=registries,manifests'
+    Run-Vcpkg install @commonArgs '--feature-flags=registries,manifests'
     Throw-IfFailed
 }
 finally
@@ -387,10 +383,9 @@ finally
     Pop-Location
 }
 
-
 # test builtin registry
 Write-Trace "test builtin registry with baseline"
-$manifestDir = "$TestingRoot/manifest"
+$manifestDir = "$TestingRoot/manifest-builtin"
 
 New-Item -Path $manifestDir -ItemType Directory
 $manifestDir = (Get-Item $manifestDir).FullName
@@ -407,8 +402,52 @@ try
     New-Item -Path 'vcpkg.json' -ItemType File `
         -Value (ConvertTo-Json -Depth 5 -InputObject $vcpkgJson)
 
-    Run-Vcpkg search @builtinRegistryArgs zlib
+    Run-Vcpkg search @commonArgs zlib
     Throw-IfFailed
+}
+finally
+{
+    Pop-Location
+}
+
+
+# test nonexistent overrides regression (https://github.com/microsoft/vcpkg/issues/36994)
+Write-Trace "test nonexistent overrides regression"
+$manifestDir = "$TestingRoot/manifest-nonexistent-override"
+
+New-Item -Path $manifestDir -ItemType Directory
+$manifestDir = (Get-Item $manifestDir).FullName
+
+Push-Location $manifestDir
+try
+{
+    $vcpkgJson = @{
+        "name" = "manifest-test";
+        "version" = "1.0.0";
+        "dependencies" = @(
+            "nonexistent"
+        );
+        "overrides" = @(@{
+            "name" = "nonexistent";
+            "version" = "0";
+        });
+        "vcpkg-configuration" = @{
+            "default-registry" = @{
+                "kind" = "git";
+                "repository" = "https://github.com/microsoft/vcpkg";
+                "baseline" = "a4b5cde7f504c1bbbbc455f4a6ee60efd9034772";
+            };
+        };
+    }
+
+    New-Item -Path 'vcpkg.json' -ItemType File `
+        -Value (ConvertTo-Json -Depth 5 -InputObject $vcpkgJson)
+
+    $out = Run-VcpkgAndCaptureOutput install @commonArgs
+    Throw-IfNotFailed
+    if (-not $out.Contains("error: nonexistent does not exist")) {
+        throw "Expected nonexistent package to be mentioned in the output"
+    }
 }
 finally
 {

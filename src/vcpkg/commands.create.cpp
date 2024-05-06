@@ -1,13 +1,13 @@
 #include <vcpkg/base/checks.h>
 #include <vcpkg/base/files.h>
-#include <vcpkg/base/util.h>
 
 #include <vcpkg/buildenvironment.h>
 #include <vcpkg/commands.create.h>
-#include <vcpkg/commands.help.h>
 #include <vcpkg/commands.version.h>
 #include <vcpkg/vcpkgcmdarguments.h>
 #include <vcpkg/vcpkgpaths.h>
+
+#include <algorithm>
 
 using namespace vcpkg;
 
@@ -65,8 +65,10 @@ namespace vcpkg
             cmake_args.emplace_back("FILENAME", zip_file_name);
         }
 
-        auto cmd_launch_cmake = make_cmake_cmd(paths, paths.ports_cmake, std::move(cmake_args));
-        return cmd_execute_clean(cmd_launch_cmake).value_or_exit(VCPKG_LINE_INFO);
+        ProcessLaunchSettings settings;
+        settings.environment = get_clean_environment();
+        return cmd_execute(make_cmake_cmd(paths, paths.ports_cmake, std::move(cmake_args)), settings)
+            .value_or_exit(VCPKG_LINE_INFO);
     }
 
     void command_create_and_exit(const VcpkgCmdArguments& args, const VcpkgPaths& paths)

@@ -1,9 +1,13 @@
 #pragma once
 
-#include <vcpkg/base/files.h>
-#include <vcpkg/base/messages.h>
+#include <vcpkg/base/fwd/files.h>
+#include <vcpkg/base/fwd/messages.h>
 
-#include <vcpkg/vcpkgcmdarguments.h>
+#include <vcpkg/fwd/vcpkgcmdarguments.h>
+
+#include <vcpkg/base/stringview.h>
+
+#include <vector>
 
 namespace vcpkg
 {

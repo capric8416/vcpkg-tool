@@ -32,9 +32,9 @@ namespace vcpkg
 
     View<std::string> azure_blob_headers();
 
-    std::vector<int> download_files(const Filesystem& fs,
-                                    View<std::pair<std::string, Path>> url_pairs,
-                                    View<std::string> headers);
+    std::vector<int> download_files(View<std::pair<std::string, Path>> url_pairs,
+                                    View<std::string> headers,
+                                    View<std::string> secrets);
 
     bool send_snapshot_to_api(const std::string& github_token,
                               const std::string& github_repository,
@@ -115,4 +115,12 @@ namespace vcpkg
     };
 
     Optional<CurlProgressData> try_parse_curl_progress_data(StringView curl_progress_line);
+
+    // Replaces spaces with %20 for purposes of including in a URL.
+    // This is typically used to filter a command line passed to `x-download` or similar which
+    // might contain spaces that we, in turn, pass to curl.
+    //
+    // Notably, callers of this function can't use Strings::percent_encode because the URL
+    // is likely to contain query parameters or similar.
+    std::string url_encode_spaces(StringView url);
 }

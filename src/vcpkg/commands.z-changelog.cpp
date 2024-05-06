@@ -1,5 +1,5 @@
 #include <vcpkg/base/files.h>
-#include <vcpkg/base/format.h>
+#include <vcpkg/base/fmt.h>
 
 #include <vcpkg/commands.portsdiff.h>
 #include <vcpkg/commands.z-changelog.h>
@@ -30,8 +30,6 @@ namespace vcpkg
         const auto portsdiff = find_portsdiff(paths, git_commit_id_for_previous_snapshot, "HEAD");
 
         std::string result;
-        result.append("vcpkg (FROM - TO)\n");
-        result.append("---\n");
         auto total_port_count = paths.get_filesystem()
                                     .get_directories_non_recursive(paths.builtin_ports_directory(), VCPKG_LINE_INFO)
                                     .size();
@@ -46,7 +44,8 @@ namespace vcpkg
         result.append("|x64-uwp|Building...|\n");
         result.append("|arm64-windows|Building...|\n");
         result.append("|arm64-uwp|Building...|\n");
-        result.append("|**x64-osx**|Building...|\n");
+        result.append("|**arm64-osx**|Building...|\n");
+        result.append("|x64-osx|Building...|\n");
         result.append("|**x64-linux**|Building...|\n");
         result.append("|arm-neon-android|Building...|\n");
         result.append("|x64-android|Building...|\n");
@@ -82,7 +81,7 @@ namespace vcpkg
             result.append("<details>\n");
             fmt::format_to(std::back_inserter(result),
                            "<summary><b>The following {} ports have been updated:</b></summary>\n\n",
-                           portsdiff.added_ports.size());
+                           portsdiff.updated_ports.size());
             result.append("|port|original version|new version|\n");
             result.append("|---|---|---|\n");
             for (auto&& updated_port : portsdiff.updated_ports)
@@ -115,7 +114,7 @@ namespace vcpkg
 
         result.append("#### New Contributors\n");
 
-        msg::write_unlocalized_text_to_stdout(Color::none, result);
+        msg::write_unlocalized_text(Color::none, result);
         Checks::exit_success(VCPKG_LINE_INFO);
     }
 }

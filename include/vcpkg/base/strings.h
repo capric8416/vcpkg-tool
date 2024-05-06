@@ -43,6 +43,40 @@ namespace vcpkg::Strings::details
 
 namespace vcpkg::Strings
 {
+#ifdef __cpp_lib_boyer_moore_searcher
+    struct vcpkg_searcher
+    {
+        vcpkg_searcher(std::string::const_iterator first, std::string::const_iterator last) : impl(first, last) { }
+
+        template<class SearchIt>
+        SearchIt search(SearchIt first, SearchIt last) const noexcept
+        {
+            return std::search(first, last, impl);
+        }
+
+    private:
+        std::boyer_moore_horspool_searcher<std::string::const_iterator> impl;
+    };
+#else
+    struct vcpkg_searcher
+    {
+        vcpkg_searcher(std::string::const_iterator first, std::string::const_iterator last)
+            : first_pattern(first), last_pattern(last)
+        {
+        }
+
+        template<class SearchIt>
+        SearchIt search(SearchIt first, SearchIt last) const noexcept
+        {
+            return std::search(first, last, first_pattern, last_pattern);
+        }
+
+    private:
+        std::string::const_iterator first_pattern;
+        std::string::const_iterator last_pattern;
+    };
+#endif
+
     template<class... Args>
     std::string& append(std::string& into, const Args&... args)
     {
@@ -107,17 +141,21 @@ namespace vcpkg::Strings
                                    Transformer transformer)
     {
         std::string output;
-        if (first != last)
+        if (first == last)
         {
-            Strings::append(output, transformer(*first));
-            for (++first; first != last; ++first)
-            {
-                output.append(delimiter.data(), delimiter.size());
-                Strings::append(output, transformer(*first));
-            }
+            return output;
         }
 
-        return output;
+        for (;;)
+        {
+            Strings::append(output, transformer(*first));
+            if (++first == last)
+            {
+                return output;
+            }
+
+            output.append(delimiter.data(), delimiter.size());
+        }
     }
 
     template<class Container, class Transformer>
@@ -169,11 +207,11 @@ namespace vcpkg::Strings
                                                                  StringView left_tag,
                                                                  StringView right_tag);
 
-    bool contains_any_ignoring_c_comments(const std::string& source, View<StringView> to_find);
+    bool contains_any_ignoring_c_comments(const std::string& source, View<vcpkg_searcher> to_find);
 
-    bool contains_any_ignoring_hash_comments(StringView source, View<StringView> to_find);
+    bool contains_any_ignoring_hash_comments(StringView source, View<vcpkg_searcher> to_find);
 
-    bool contains_any(StringView source, View<StringView> to_find);
+    bool long_string_contains_any(StringView source, View<vcpkg_searcher> to_find);
 
     [[nodiscard]] bool equals(StringView a, StringView b);
 

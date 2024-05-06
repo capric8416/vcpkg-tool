@@ -1,14 +1,6 @@
-#include <catch2/catch.hpp>
-
-#include <vcpkg/base/files.h>
+#include <vcpkg-test/util.h>
 
 #include <vcpkg/commands.z-extract.h>
-#include <vcpkg/vcpkgcmdarguments.h>
-#include <vcpkg/vcpkgpaths.h>
-
-#include <limits.h>
-
-#include <vcpkg-test/util.h>
 
 using namespace vcpkg;
 
@@ -137,7 +129,7 @@ TEST_CASE ("Testing strip auto's get_common_prefix_count", "z-extract")
 
 TEST_CASE ("Testing get_strip_setting", "z-extract")
 {
-    std::map<std::string, std::string, std::less<>> settings;
+    std::map<StringLiteral, std::string, std::less<>> settings;
 
     SECTION ("Test no strip")
     {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vcpkg/base/fwd/graphs.h>
+
 #include <vcpkg/fwd/cmakevars.h>
 #include <vcpkg/fwd/portfileprovider.h>
 
@@ -9,36 +11,13 @@
 #include <vcpkg/packagespec.h>
 #include <vcpkg/statusparagraph.h>
 
-#include <functional>
 #include <map>
+#include <string>
 #include <vector>
 
 namespace vcpkg
 {
-    struct GraphRandomizer;
-
-    enum class UnsupportedPortAction : bool
-    {
-        Warn,
-        Error,
-    };
-
-    enum class RequestType
-    {
-        UNKNOWN,
-        USER_REQUESTED,
-        AUTO_SELECTED
-    };
-
     [[nodiscard]] StringLiteral request_type_indent(RequestType request_type);
-
-    enum class InstallPlanType
-    {
-        UNKNOWN,
-        BUILD_AND_INSTALL,
-        ALREADY_INSTALLED,
-        EXCLUDED
-    };
 
     struct BasicAction
     {
@@ -49,8 +28,6 @@ namespace vcpkg
 
     struct PackageAction : BasicAction
     {
-        std::string displayname() const;
-
         std::vector<PackageSpec> package_dependencies;
         InternalFeatureSet feature_list;
     };
@@ -62,13 +39,17 @@ namespace vcpkg
         InstallPlanAction& operator=(const InstallPlanAction&) = delete;
         InstallPlanAction& operator=(InstallPlanAction&&) = default;
 
-        InstallPlanAction(InstalledPackageView&& spghs, const RequestType& request_type);
+        InstallPlanAction(InstalledPackageView&& spghs,
+                          RequestType request_type,
+                          UseHeadVersion use_head_version,
+                          Editable editable);
 
         InstallPlanAction(const PackageSpec& spec,
                           const SourceControlFileAndLocation& scfl,
                           const Path& packages_dir,
-                          const RequestType& request_type,
-                          Triplet host_triplet,
+                          RequestType request_type,
+                          UseHeadVersion use_head_version,
+                          Editable editable,
                           std::map<std::string, std::vector<FeatureSpec>>&& dependencies,
                           std::vector<LocalizedString>&& build_failure_messages,
                           std::vector<std::string> default_features);
@@ -78,6 +59,7 @@ namespace vcpkg
         Optional<const std::string&> package_abi() const;
         const PreBuildInfo& pre_build_info(LineInfo li) const;
         Version version() const;
+        std::string display_name() const;
 
         Optional<const SourceControlFileAndLocation&> source_control_file_and_location;
         Optional<InstalledPackageView> installed_package;
@@ -85,11 +67,11 @@ namespace vcpkg
 
         InstallPlanType plan_type;
         RequestType request_type;
-        BuildPackageOptions build_options;
+        UseHeadVersion use_head_version;
+        Editable editable;
 
         std::map<std::string, std::vector<FeatureSpec>> feature_dependencies;
         std::vector<LocalizedString> build_failure_messages;
-        Triplet host_triplet;
 
         // only valid with source_control_file_and_location
         Optional<AbiInfo> abi_info;
@@ -120,13 +102,6 @@ namespace vcpkg
         std::map<FeatureSpec, PlatformExpression::Expr> unsupported_features;
     };
 
-    enum class ExportPlanType
-    {
-        UNKNOWN,
-        NOT_BUILT,
-        ALREADY_BUILT
-    };
-
     struct ExportPlanAction : BasicAction
     {
         ExportPlanAction(const ExportPlanAction&) = delete;
@@ -150,12 +125,43 @@ namespace vcpkg
 
     struct CreateInstallPlanOptions
     {
-        CreateInstallPlanOptions(Triplet t, const Path& p, UnsupportedPortAction action = UnsupportedPortAction::Error)
-            : host_triplet(t), packages_dir(p), unsupported_port_action(action)
+        CreateInstallPlanOptions(GraphRandomizer* randomizer,
+                                 Triplet host_triplet,
+                                 const Path& packages_dir,
+                                 UnsupportedPortAction action,
+                                 UseHeadVersion use_head_version_if_user_requested,
+                                 Editable editable_if_user_requested)
+            : randomizer(randomizer)
+            , host_triplet(host_triplet)
+            , packages_dir(packages_dir)
+            , unsupported_port_action(action)
+            , use_head_version_if_user_requested(use_head_version_if_user_requested)
+            , editable_if_user_requested(editable_if_user_requested)
         {
         }
 
-        GraphRandomizer* randomizer = nullptr;
+        GraphRandomizer* randomizer;
+        Triplet host_triplet;
+        Path packages_dir;
+        UnsupportedPortAction unsupported_port_action;
+        UseHeadVersion use_head_version_if_user_requested;
+        Editable editable_if_user_requested;
+    };
+
+    struct CreateUpgradePlanOptions
+    {
+        CreateUpgradePlanOptions(GraphRandomizer* randomizer,
+                                 Triplet host_triplet,
+                                 const Path& packages_dir,
+                                 UnsupportedPortAction action)
+            : randomizer(randomizer)
+            , host_triplet(host_triplet)
+            , packages_dir(packages_dir)
+            , unsupported_port_action(action)
+        {
+        }
+
+        GraphRandomizer* randomizer;
         Triplet host_triplet;
         Path packages_dir;
         UnsupportedPortAction unsupported_port_action;
@@ -189,7 +195,7 @@ namespace vcpkg
                                    const CMakeVars::CMakeVarProvider& var_provider,
                                    const std::vector<PackageSpec>& specs,
                                    const StatusParagraphs& status_db,
-                                   const CreateInstallPlanOptions& options);
+                                   const CreateUpgradePlanOptions& options);
 
     ExpectedL<ActionPlan> create_versioned_install_plan(const IVersionedPortfileProvider& vprovider,
                                                         const IBaselineProvider& bprovider,
